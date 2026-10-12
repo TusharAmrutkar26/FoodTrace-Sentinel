@@ -9,9 +9,9 @@ app = FastAPI(title=APP_NAME, debug=APP_ENV == "development")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Accept", "Content-Type", "X-CSRF-Token"],
 )
 
 

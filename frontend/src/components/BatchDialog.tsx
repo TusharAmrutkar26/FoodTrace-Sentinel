@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { BatchActivity } from "./BatchActivity";
+import { BatchQrPanel } from "./BatchQrPanel";
 import { api, ApiError } from "../lib/api";
 import { UNITS, type Batch, type BatchCreateInput, type BatchUpdateInput, type Organization, type Product } from "../types/api";
+import { translateMessage, translateOrFallback, useI18n } from "../i18n";
 
 type DialogMode = "create" | "details";
 type FormState = {
@@ -37,8 +39,8 @@ function isPositiveDecimal(value: string): boolean {
   return /^\d+(?:\.\d+)?$/.test(value) && /[1-9]/.test(value);
 }
 
-function displayDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function displayDate(value: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 interface BatchDialogProps {
@@ -46,11 +48,15 @@ interface BatchDialogProps {
   batchCode?: string;
   products: Product[];
   organizations: Organization[];
+  catalogLoading: boolean;
+  catalogError: string;
+  onRetryCatalogs: () => void;
   onClose: () => void;
   onSaved: (batch: Batch, message: string) => void;
 }
 
-export function BatchDialog({ initialMode, batchCode, products, organizations, onClose, onSaved }: BatchDialogProps) {
+export function BatchDialog({ initialMode, batchCode, products, organizations, catalogLoading, catalogError, onRetryCatalogs, onClose, onSaved }: BatchDialogProps) {
+  const { t, intlLocale, locale } = useI18n();
   const [mode] = useState<DialogMode>(initialMode);
   const [editing, setEditing] = useState(false);
   const [batch, setBatch] = useState<Batch | null>(null);
@@ -61,10 +67,10 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const title = useMemo(() => {
-    if (mode === "create") return "Register a batch";
-    if (editing) return `Edit ${batch?.batch_code ?? "batch"}`;
-    return "Batch details";
-  }, [batch?.batch_code, editing, mode]);
+    if (mode === "create") return t("Register a batch");
+    if (editing) return `${t("Edit batch")} ${batch?.batch_code ?? t("Batch")}`;
+    return t("Batch details");
+  }, [batch?.batch_code, editing, mode, t]);
 
   useEffect(() => {
     if (mode !== "details" || !batchCode) return;
@@ -77,7 +83,7 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
         setForm(toForm(item));
       })
       .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : "Unable to load this batch.");
+        if (active) setError(cause instanceof Error ? translateMessage(locale, cause.message) : t("Unable to load this batch."));
       })
       .finally(() => active && setLoading(false));
     return () => { active = false; };
@@ -109,18 +115,18 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
   function validate(): Record<string, string> {
     const errors: Record<string, string> = {};
     if (mode === "create") {
-      if (!form.batch_code.trim()) errors.batch_code = "Enter a batch code.";
+      if (!form.batch_code.trim()) errors.batch_code = t("Enter a batch code.");
       else if (form.batch_code.trim().length > 64 || !/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(form.batch_code.trim())) {
-        errors.batch_code = "Use letters, numbers, and single hyphens between groups (up to 64 characters).";
+        errors.batch_code = t("Use letters, numbers, and single hyphens between groups (up to 64 characters).");
       }
     }
-    if (!form.product_id || !products.some((item) => item.id === Number(form.product_id))) errors.product_id = "Choose an available product.";
+    if (!form.product_id || !products.some((item) => item.id === Number(form.product_id))) errors.product_id = t("Choose an available product.");
     if (!form.origin_organization_id || !organizations.some((item) => item.id === Number(form.origin_organization_id))) {
-      errors.origin_organization_id = "Choose an available organization.";
+      errors.origin_organization_id = t("Choose an available organization.");
     }
-    if (!form.origin_location.trim()) errors.origin_location = "Enter the batch origin location.";
-    if (form.origin_location.trim().length > 240) errors.origin_location = "Location must be 240 characters or fewer.";
-    if (!isPositiveDecimal(form.quantity)) errors.quantity = "Enter a positive decimal, for example 100.000.";
+    if (!form.origin_location.trim()) errors.origin_location = t("Enter the batch origin location.");
+    if (form.origin_location.trim().length > 240) errors.origin_location = t("Location must be 240 characters or fewer.");
+    if (!isPositiveDecimal(form.quantity)) errors.quantity = t("Enter a positive decimal, for example 100.000.");
     return errors;
   }
 
@@ -129,7 +135,7 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
     const errors = validate();
     setFieldErrors(errors);
     if (Object.keys(errors).length) {
-      setError("Review the highlighted fields and try again.");
+      setError(t("Review the highlighted fields and try again."));
       return;
     }
     setSaving(true);
@@ -146,7 +152,7 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
           unit: form.unit,
         };
         saved = await api.createBatch(payload);
-        onSaved(saved, `Batch ${saved.batch_code} was created.`);
+        onSaved(saved, t("Batch {code} was created.", { code: saved.batch_code }));
       } else if (batch) {
         const payload: BatchUpdateInput = {
           product_id: Number(form.product_id),
@@ -156,14 +162,14 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
           unit: form.unit,
         };
         saved = await api.updateBatch(batch.batch_code, payload);
-        onSaved(saved, `Batch ${saved.batch_code} was updated.`);
+        onSaved(saved, t("Batch {code} was updated.", { code: saved.batch_code }));
       }
     } catch (cause: unknown) {
       if (cause instanceof ApiError) {
-        setError(cause.message);
-        setFieldErrors(cause.fields);
+        setError(translateMessage(locale, cause.message));
+        setFieldErrors(Object.fromEntries(Object.entries(cause.fields).map(([key, value]) => [key, translateOrFallback(locale, value)])));
       } else {
-        setError(cause instanceof Error ? cause.message : "The batch could not be saved.");
+        setError(cause instanceof Error ? translateMessage(locale, cause.message) : t("The batch could not be saved."));
       }
     } finally {
       setSaving(false);
@@ -178,66 +184,76 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
     setEditing(true);
   }
 
-  const canCreate = products.length > 0 && organizations.length > 0;
+  const canCreate = products.length > 0 && organizations.length > 0 && !catalogLoading && !catalogError;
 
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
       <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="batch-dialog-title">
         <header className="dialog-header">
           <div>
-            <p className="eyebrow">Batch management</p>
+            <p className="eyebrow">{t("Batch management")}</p>
             <h2 id="batch-dialog-title">{title}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close dialog" disabled={saving}>×</button>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={t("Close dialog")} disabled={saving}>×</button>
         </header>
 
-        {loading ? <div className="dialog-loading" role="status"><span className="spinner" /> Loading batch…</div> : null}
+        {loading ? <div className="dialog-loading" role="status"><span className="spinner" /> {t("Loading batch…")}</div> : null}
 
         {!loading && mode === "details" && !editing && batch ? (
           <div className="detail-content">
             <div className="detail-code"><span className="status-dot" />{batch.batch_code}</div>
             <dl className="detail-grid">
-              <div><dt>Product</dt><dd>{batch.product.name}</dd></div>
-              <div><dt>Origin organization</dt><dd>{batch.origin_organization.name}<small>{batch.origin_organization.participant_type ?? "Organization"}</small></dd></div>
-              <div><dt>Origin location</dt><dd>{batch.origin_location}</dd></div>
-              <div><dt>Quantity</dt><dd>{batch.quantity} <span className="unit-value">{batch.unit}</span></dd></div>
-              <div><dt>Created</dt><dd>{displayDate(batch.created_at)}</dd></div>
-              <div><dt>Last updated</dt><dd>{displayDate(batch.updated_at)}</dd></div>
+              <div><dt>{t("Product")}</dt><dd>{batch.product.name}</dd></div>
+              <div><dt>{t("Origin organization")}</dt><dd>{batch.origin_organization.name}<small>{batch.origin_organization.participant_type ?? t("Organization")}</small></dd></div>
+              <div><dt>{t("Origin location")}</dt><dd>{batch.origin_location}</dd></div>
+              <div><dt>{t("Quantity")}</dt><dd>{batch.quantity} <span className="unit-value">{batch.unit}</span></dd></div>
+              <div><dt>{t("Created")}</dt><dd>{displayDate(batch.created_at, intlLocale)}</dd></div>
+              <div><dt>{t("Last updated")}</dt><dd>{displayDate(batch.updated_at, intlLocale)}</dd></div>
             </dl>
+            <BatchQrPanel batchCode={batch.batch_code} />
             <BatchActivity batchCode={batch.batch_code} organizations={organizations} />
             <div className="dialog-actions">
-              <button type="button" className="button button-secondary" onClick={onClose}>Close</button>
-              <button type="button" className="button button-primary" onClick={beginEditing}>Edit batch</button>
+              <button type="button" className="button button-secondary" onClick={onClose}>{t("Close")}</button>
+              <button type="button" className="button button-primary" onClick={beginEditing}>{t("Edit batch")}</button>
             </div>
           </div>
         ) : null}
 
         {!loading && (mode === "create" || editing) ? (
           <form className="batch-form" onSubmit={handleSubmit} noValidate>
-            {mode === "create" && !canCreate ? (
-              <div className="callout" role="status">Create at least one product and one organization in the API before registering a batch.</div>
+            {mode === "create" && catalogLoading ? (
+              <div className="callout" role="status"><span className="spinner" /> {t("Loading products and organizations from the API…")}</div>
+            ) : null}
+            {mode === "create" && !catalogLoading && catalogError ? (
+              <div className="callout catalog-error" role="alert">
+                <span>{t("Product and organization options could not be loaded: ")}{catalogError}</span>
+                <button className="button button-secondary" type="button" onClick={onRetryCatalogs}>{t("Retry catalog request")}</button>
+              </div>
+            ) : null}
+            {mode === "create" && !catalogLoading && !catalogError && !canCreate ? (
+              <div className="callout" role="status">{t("Create at least one product and one organization in the API before registering a batch.")}</div>
             ) : null}
             {mode === "create" ? (
               <label className="field">
-                <span>Batch code <em>Required</em></span>
+                <span>{t("Batch code")} <em>{t("Required")}</em></span>
                 <input autoFocus value={form.batch_code} onChange={(event) => updateField("batch_code", event.target.value)} placeholder="e.g. MANGO-2026-001" maxLength={64} aria-invalid={Boolean(fieldErrors.batch_code)} aria-describedby={fieldErrors.batch_code ? "batch_code-error" : "batch_code-hint"} />
-                {fieldErrors.batch_code ? <small className="field-error" id="batch_code-error">{fieldErrors.batch_code}</small> : <small id="batch_code-hint">Letters, numbers, and hyphens. Codes cannot be changed later.</small>}
+                {fieldErrors.batch_code ? <small className="field-error" id="batch_code-error">{fieldErrors.batch_code}</small> : <small id="batch_code-hint">{t("Letters, numbers, and hyphens. Codes cannot be changed later.")}</small>}
               </label>
-            ) : <div className="immutable-code"><span>Batch code</span><strong>{batch?.batch_code}</strong><small>Batch codes are immutable.</small></div>}
+            ) : <div className="immutable-code"><span>{t("Batch code")}</span><strong>{batch?.batch_code}</strong><small>{t("Batch codes are immutable.")}</small></div>}
 
             <div className="form-row">
               <label className="field">
-                <span>Product <em>Required</em></span>
+                <span>{t("Product")} <em>{t("Required")}</em></span>
                 <select value={form.product_id} onChange={(event) => updateField("product_id", event.target.value)} aria-invalid={Boolean(fieldErrors.product_id)}>
-                  <option value="">Select a product</option>
+                  <option value="">{t("Select a product")}</option>
                   {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
                 </select>
                 {fieldErrors.product_id ? <small className="field-error">{fieldErrors.product_id}</small> : null}
               </label>
               <label className="field">
-                <span>Origin organization <em>Required</em></span>
+                <span>{t("Origin organization")} <em>{t("Required")}</em></span>
                 <select value={form.origin_organization_id} onChange={(event) => updateField("origin_organization_id", event.target.value)} aria-invalid={Boolean(fieldErrors.origin_organization_id)}>
-                  <option value="">Select an organization</option>
+                  <option value="">{t("Select an organization")}</option>
                   {organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
                 </select>
                 {fieldErrors.origin_organization_id ? <small className="field-error">{fieldErrors.origin_organization_id}</small> : null}
@@ -245,19 +261,19 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
             </div>
 
             <label className="field">
-              <span>Origin location <em>Required</em></span>
-              <input value={form.origin_location} onChange={(event) => updateField("origin_location", event.target.value)} placeholder="Town, region, or facility" maxLength={240} aria-invalid={Boolean(fieldErrors.origin_location)} />
+              <span>{t("Origin location")} <em>{t("Required")}</em></span>
+              <input value={form.origin_location} onChange={(event) => updateField("origin_location", event.target.value)} placeholder={t("Town, region, or facility")} maxLength={240} aria-invalid={Boolean(fieldErrors.origin_location)} />
               {fieldErrors.origin_location ? <small className="field-error">{fieldErrors.origin_location}</small> : null}
             </label>
 
             <div className="form-row quantity-row">
               <label className="field">
-                <span>Quantity <em>Required</em></span>
+                <span>{t("Quantity")} <em>{t("Required")}</em></span>
                 <input inputMode="decimal" value={form.quantity} onChange={(event) => updateField("quantity", event.target.value)} placeholder="100.000" aria-invalid={Boolean(fieldErrors.quantity)} />
-                {fieldErrors.quantity ? <small className="field-error">{fieldErrors.quantity}</small> : <small>Stored exactly as entered; use a plain decimal.</small>}
+                {fieldErrors.quantity ? <small className="field-error">{fieldErrors.quantity}</small> : <small>{t("Stored exactly as entered; use a plain decimal.")}</small>}
               </label>
               <label className="field field-unit">
-                <span>Unit</span>
+                <span>{t("Unit")}</span>
                 <select value={form.unit} onChange={(event) => updateField("unit", event.target.value as FormState["unit"])}>
                   {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
                 </select>
@@ -266,13 +282,13 @@ export function BatchDialog({ initialMode, batchCode, products, organizations, o
 
             {error ? <div className="form-error" role="alert">{error}</div> : null}
             <div className="dialog-actions">
-              {editing ? <button className="button button-secondary" type="button" onClick={() => { setEditing(false); setError(""); setFieldErrors({}); }} disabled={saving}>Cancel</button> : <button className="button button-secondary" type="button" onClick={onClose} disabled={saving}>Cancel</button>}
-              <button className="button button-primary" type="submit" disabled={saving || (mode === "create" && !canCreate)}>{saving ? <><span className="spinner spinner-light" /> Saving…</> : mode === "create" ? "Create batch" : "Save changes"}</button>
+              {editing ? <button className="button button-secondary" type="button" onClick={() => { setEditing(false); setError(""); setFieldErrors({}); }} disabled={saving}>{t("Cancel")}</button> : <button className="button button-secondary" type="button" onClick={onClose} disabled={saving}>{t("Cancel")}</button>}
+              <button className="button button-primary" type="submit" disabled={saving || (mode === "create" && !canCreate)}>{saving ? <><span className="spinner spinner-light" /> {t("Saving…")}</> : mode === "create" ? t("Create batch") : t("Save changes")}</button>
             </div>
           </form>
         ) : null}
 
-        {!loading && mode === "details" && !batch ? <div className="dialog-error" role="alert">{error || "This batch could not be found."}</div> : null}
+        {!loading && mode === "details" && !batch ? <div className="dialog-error" role="alert">{error || t("This batch could not be found.")}</div> : null}
         {!loading && mode === "create" && error ? <div className="sr-only" role="alert">{error}</div> : null}
       </section>
     </div>

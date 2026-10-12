@@ -57,6 +57,15 @@ def _edge_query():
     )
 
 
+def _scoped_edges(statement, organization_id: int | None):
+    if organization_id is None:
+        return statement
+    return statement.where(
+        BatchGenealogy.parent.has(Batch.origin_organization_id == organization_id),
+        BatchGenealogy.child.has(Batch.origin_organization_id == organization_id),
+    )
+
+
 def _path_exists(session: Session, start_id: int, target_id: int) -> bool:
     frontier = [start_id]
     visited = {start_id}
@@ -158,18 +167,18 @@ def create_relationship(
 
 
 def get_genealogy(
-    session: Session, batch_code: str
+    session: Session, batch_code: str, *, organization_id: int | None = None
 ) -> GenealogyGraphRead | None:
     batch = _batch_by_code(session, batch_code)
     if batch is None:
         return None
     parents = session.scalars(
-        _edge_query()
+        _scoped_edges(_edge_query(), organization_id)
         .where(BatchGenealogy.child_batch_id == batch.id)
         .order_by(BatchGenealogy.created_at, BatchGenealogy.id)
     ).all()
     children = session.scalars(
-        _edge_query()
+        _scoped_edges(_edge_query(), organization_id)
         .where(BatchGenealogy.parent_batch_id == batch.id)
         .order_by(BatchGenealogy.created_at, BatchGenealogy.id)
     ).all()
@@ -181,7 +190,7 @@ def get_genealogy(
 
 
 def trace_genealogy(
-    session: Session, batch_code: str, direction: TraceDirection
+    session: Session, batch_code: str, direction: TraceDirection, *, organization_id: int | None = None
 ) -> GenealogyTraceRead | None:
     root = _batch_by_code(session, batch_code)
     if root is None:
@@ -200,7 +209,9 @@ def trace_genealogy(
                 BatchGenealogy.child_batch_id.in_(frontier)
             )
         edges = session.scalars(
-            statement.order_by(BatchGenealogy.created_at, BatchGenealogy.id)
+            _scoped_edges(statement, organization_id).order_by(
+                BatchGenealogy.created_at, BatchGenealogy.id
+            )
         ).all()
         next_frontier = []
         for edge in edges:

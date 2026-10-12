@@ -12,6 +12,7 @@ from app.models.types import ExactDecimalText
 if TYPE_CHECKING:
     from app.models.batch_event import BatchEvent
     from app.models.batch_genealogy import BatchGenealogy
+    from app.models.batch_trace_identity import BatchTraceIdentity
     from app.models.organization import Organization
     from app.models.product import Product
 
@@ -71,4 +72,8 @@ class Batch(Base):
         foreign_keys="BatchGenealogy.parent_batch_id",
         back_populates="parent",
         passive_deletes="all",
+    )
+    trace_identity: Mapped["BatchTraceIdentity | None"] = relationship(
+        back_populates="batch",
+        uselist=False,
     )

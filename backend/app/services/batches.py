@@ -1,8 +1,10 @@
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
+from uuid import uuid4
 
 from app.models.batch import Batch
+from app.models.batch_trace_identity import BatchTraceIdentity
 from app.models.organization import Organization
 from app.models.product import Product
 from app.schemas.batch import BatchCreate, BatchUpdate
@@ -71,6 +73,9 @@ def list_batches(
 def create_batch(session: Session, payload: BatchCreate) -> Batch:
     if session.get(Product, payload.product_id) is None:
         raise RelatedRecordMissing("Product was not found")
+    product = session.get(Product, payload.product_id)
+    if product is not None and product.organization_id not in {None, payload.origin_organization_id}:
+        raise RelatedRecordMissing("Product is not available to the selected organization")
     if session.get(Organization, payload.origin_organization_id) is None:
         raise RelatedRecordMissing("Origin organization was not found")
 
@@ -81,6 +86,7 @@ def create_batch(session: Session, payload: BatchCreate) -> Batch:
         origin_location=payload.origin_location,
         quantity=payload.quantity,
         unit=payload.unit.value,
+        trace_identity=BatchTraceIdentity(trace_id=uuid4().hex),
     )
     session.add(batch)
     try:
@@ -114,6 +120,8 @@ def update_batch(session: Session, batch_code: str, payload: BatchUpdate) -> Bat
         product = session.get(Product, changes["product_id"])
         if product is None:
             raise RelatedRecordMissing("Product was not found")
+        if product.organization_id not in {None, batch.origin_organization_id}:
+            raise RelatedRecordMissing("Product is not available to the selected organization")
         batch.product = product
     if "origin_organization_id" in changes:
         organization = session.get(Organization, changes["origin_organization_id"])

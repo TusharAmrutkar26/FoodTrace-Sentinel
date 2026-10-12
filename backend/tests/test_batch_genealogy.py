@@ -1,5 +1,3 @@
-import pytest
-
 from tests.conftest import batch_payload
 
 
@@ -172,6 +170,9 @@ def test_quantity_units_and_split_allocations_are_validated_exactly(
     over_parent_quantity = create_edge(
         client, parent, third, "transformation", source_quantity="10.001", source_unit="kg"
     )
+    zero_quantity = create_edge(
+        client, parent, third, "transformation", source_quantity="0", source_unit="kg"
+    )
     over_split_allocation = create_edge(
         client, parent, third, "split", source_quantity="0.001", source_unit="kg"
     )
@@ -188,6 +189,7 @@ def test_quantity_units_and_split_allocations_are_validated_exactly(
     assert valid.status_code == remaining.status_code == 201
     assert valid.json()["source_quantity"] == "6.250"
     assert wrong_unit.status_code == over_parent_quantity.status_code == 422
+    assert zero_quantity.status_code == 422
     assert over_split_allocation.status_code == missing_unit.status_code == 422
 
 
