@@ -221,6 +221,17 @@ describe("FoodTrace Sentinel batch dashboard", () => {
     await waitFor(() => expect(api.getSupplyChainReport).toHaveBeenCalledWith(expect.objectContaining({ start_date: expect.any(String), end_date: expect.any(String) })));
   });
 
+  it("opens the live Batch Genealogy Explorer from workspace navigation", async () => {
+    const user = userEvent.setup();
+    await renderDashboard();
+
+    await user.click(screen.getByRole("button", { name: "Batch genealogy explorer" }));
+
+    expect(await screen.findByRole("heading", { name: "Batch genealogy explorer" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search for a batch" })).toBeInTheDocument();
+    expect(screen.getAllByText("Enter a batch code or product name to see its recorded relationships.")).toHaveLength(2);
+  });
+
   it("opens the Recall simulator workspace and loads selectable batch records", async () => {
     const user = userEvent.setup();
     await renderDashboard();
@@ -474,9 +485,17 @@ describe("public batch trace page", () => {
     children: [],
     upstream: [{ batch_code: "MANGO-SOURCE-1", product_name: "Alphonso Mango", quantity: "50.000", unit: "kg" as const, depth: 1 }],
     downstream: [],
+    trace_trust_findings: [{
+      check_type: "process_loss_incomplete" as const,
+      severity: "low" as const,
+      status: "incomplete" as const,
+      title: "Process loss could not be assessed",
+      explanation: "The relationship does not record an input quantity.",
+    }],
   };
 
   beforeEach(() => {
+    window.localStorage.removeItem("foodtrace-language");
     window.history.pushState({}, "", `/trace/${traceId}`);
     vi.mocked(api.getPublicBatchTrace).mockResolvedValue(publicTrace);
   });
@@ -491,8 +510,57 @@ describe("public batch trace page", () => {
     expect(screen.getByText("Quality Checked")).toBeInTheDocument();
     expect(screen.getByText("Packing station")).toBeInTheDocument();
     expect(screen.getAllByText("MANGO-SOURCE-1").length).toBeGreaterThan(0);
+    expect(screen.getByText("TraceTrust data checks")).toBeInTheDocument();
+    expect(screen.getByText("Process loss could not be assessed")).toBeInTheDocument();
+    expect(screen.getByText("Incomplete evidence")).toBeInTheDocument();
+    expect(screen.getByText(/Findings are prompts for review, not proof/i)).toBeInTheDocument();
     expect(screen.getByText(/does not prove the physical product or packaging is authentic/i)).toBeInTheDocument();
     expect(screen.queryByText(/Private phone number/)).not.toBeInTheDocument();
+    expect(api.getPublicBatchTrace).toHaveBeenCalledWith(traceId);
+    expect(api.getTrustFindings).not.toHaveBeenCalled();
+  });
+
+  it("shows honest empty states when no events, relationships, or findings are recorded", async () => {
+    vi.mocked(api.getPublicBatchTrace).mockResolvedValueOnce({
+      ...publicTrace,
+      events: [],
+      parents: [],
+      children: [],
+      upstream: [],
+      downstream: [],
+      trace_trust_findings: [],
+    });
+    render(<App />);
+
+    expect(await screen.findByText(/No events or genealogy links are recorded for this batch/i)).toBeInTheDocument();
+    expect(screen.getByText("No events have been recorded for this batch.")).toBeInTheDocument();
+    expect(screen.getAllByText("No recorded batch links.")).toHaveLength(2);
+    expect(screen.getByText(/No TraceTrust findings were returned/)).toBeInTheDocument();
+    expect(screen.getByText(/No findings do not certify food safety/)).toBeInTheDocument();
+  });
+
+  it("keeps the public trace page readable when an older API omits TraceTrust findings", async () => {
+    const { trace_trust_findings: _traceTrustFindings, ...legacyTrace } = publicTrace;
+    expect(_traceTrustFindings).toBeDefined();
+    vi.mocked(api.getPublicBatchTrace).mockResolvedValueOnce(legacyTrace);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Alphonso Mango" })).toBeInTheDocument();
+    expect(screen.getByText("TraceTrust data checks")).toBeInTheDocument();
+    expect(screen.getByText(/TraceTrust findings are unavailable in this API response/)).toBeInTheDocument();
+    expect(screen.queryByText(/No TraceTrust findings were returned/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the public route and data while translating passport labels", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Alphonso Mango" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Language" }), "hi");
+
+    expect(screen.getByText("दर्ज की गई जानकारी")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Alphonso Mango" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe(`/trace/${traceId}`);
     expect(api.getPublicBatchTrace).toHaveBeenCalledWith(traceId);
   });
 

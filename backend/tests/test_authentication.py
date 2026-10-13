@@ -12,6 +12,9 @@ from app.core.config import (
 from app.models.user import User
 from app.models.user_invitation import UserInvitation
 from app.models.user_session import UserSession
+from app.models.batch import Batch
+from app.models.batch_trace_identity import BatchTraceIdentity
+from app.models.product import Product
 from app.services.authentication import token_digest, verify_password
 
 
@@ -76,6 +79,119 @@ def test_invitation_token_is_hashed_and_registration_is_single_use(client, anony
     assert "invalid or has expired" in reused.json()["detail"]
     db_session.expire_all()
     assert db_session.get(UserInvitation, stored.id).used_at is not None
+
+
+def test_public_registration_normalizes_email_is_least_privilege_and_supports_logout(anonymous_client, db_session):
+    registration = anonymous_client.post(
+        "/api/v1/auth/register",
+        json={"email": "  New.User@Example.Test ", "password": "A-long-test-password!"},
+    )
+    assert registration.status_code == 201, registration.text
+    body = registration.json()
+    assert body["user"]["email"] == "new.user@example.test"
+    assert body["user"]["role"] == "viewer"
+    assert body["user"]["organization"] is None
+    assert registration.cookies.get(AUTH_COOKIE_NAME)
+    assert "HttpOnly" in registration.headers["set-cookie"]
+
+    account = db_session.scalar(select(User).where(User.email == "new.user@example.test"))
+    assert account is not None
+    assert account.organization_id is None
+    assert account.role == "viewer"
+    assert account.password_hash.startswith("$argon2id$")
+    assert verify_password(account.password_hash, "A-long-test-password!")
+    session_row = db_session.scalar(select(UserSession).where(UserSession.user_id == account.id))
+    assert session_row is not None
+    assert session_row.token_hash == token_digest(registration.cookies[AUTH_COOKIE_NAME])
+    assert session_row.token_hash != registration.cookies[AUTH_COOKIE_NAME]
+    assert anonymous_client.get("/api/v1/auth/me").status_code == 200
+
+    elevated = anonymous_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "attempted-admin@example.test",
+            "password": "A-long-test-password!",
+            "role": "org_admin",
+            "organization_id": 1,
+        },
+    )
+    assert elevated.status_code == 422
+    assert db_session.scalar(select(User.id).where(User.email == "attempted-admin@example.test")) is None
+
+    duplicate = anonymous_client.post(
+        "/api/v1/auth/register",
+        json={"email": "NEW.USER@example.test", "password": "Another-long-test!123"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "An account with this email already exists"
+
+    anonymous_client.headers["X-CSRF-Token"] = body["csrf_token"]
+    assert anonymous_client.post("/api/v1/auth/logout").status_code == 204
+    db_session.expire_all()
+    assert db_session.get(UserSession, session_row.id).revoked_at is not None
+    assert anonymous_client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_public_registration_rejects_invalid_password_without_creating_account(anonymous_client, db_session):
+    response = anonymous_client.post(
+        "/api/v1/auth/register",
+        json={"email": "short-password@example.test", "password": "too-short"},
+    )
+
+    assert response.status_code == 422
+    assert db_session.scalar(
+        select(User.id).where(User.email == "short-password@example.test")
+    ) is None
+
+
+def test_unassigned_self_registered_user_cannot_read_private_organization_records(
+    client, anonymous_client, references, db_session
+):
+    batch = client.post("/api/v1/batches", json={
+        "batch_code": "PRIVATE-SELF-REG-BATCH",
+        "product_id": references["product_id"],
+        "origin_organization_id": references["organization_id"],
+        "origin_location": "Private farm",
+        "quantity": "12.000",
+        "unit": "kg",
+    })
+    assert batch.status_code == 201
+    private_product = Product(name="Private organization product", organization_id=references["organization_id"])
+    db_session.add(private_product)
+    db_session.commit()
+
+    registration = anonymous_client.post(
+        "/api/v1/auth/register",
+        json={"email": "unassigned@example.test", "password": "A-long-test-password!"},
+    )
+    assert registration.status_code == 201
+    assert anonymous_client.get("/api/v1/organizations").json()["total"] == 0
+    assert anonymous_client.get("/api/v1/batches?limit=100").json()["total"] == 0
+    assert anonymous_client.get(f"/api/v1/batches/{batch.json()['batch_code']}").status_code == 404
+    visible_products = anonymous_client.get("/api/v1/products").json()["items"]
+    assert "Private organization product" not in {product["name"] for product in visible_products}
+
+
+def test_valid_public_trace_remains_anonymous(client, anonymous_client, references, db_session):
+    batch = client.post("/api/v1/batches", json={
+        "batch_code": "PUBLIC-ANONYMOUS-TRACE",
+        "product_id": references["product_id"],
+        "origin_organization_id": references["organization_id"],
+        "origin_location": "Public trace origin",
+        "quantity": "2.000",
+        "unit": "kg",
+    })
+    assert batch.status_code == 201
+    identity = db_session.scalar(
+        select(BatchTraceIdentity)
+        .join(Batch, Batch.id == BatchTraceIdentity.batch_id)
+        .where(Batch.batch_code == "PUBLIC-ANONYMOUS-TRACE")
+    )
+    assert identity is not None
+
+    response = anonymous_client.get(f"/api/v1/public-traces/{identity.trace_id}")
+    assert response.status_code == 200, response.text
+    assert response.json()["batch"]["batch_code"] == "PUBLIC-ANONYMOUS-TRACE"
 
 
 def test_expired_and_unknown_invitations_are_rejected(client, anonymous_client, references, db_session):

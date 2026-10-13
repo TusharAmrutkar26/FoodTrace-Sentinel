@@ -52,7 +52,9 @@ def list_batches(
     if actor.role != "platform_admin":
         if origin_organization_id is not None and origin_organization_id != actor.organization_id:
             raise HTTPException(status_code=404, detail="The requested organization was not found")
-        origin_organization_id = actor.organization_id
+        # None means "no filter" to the service. An unassigned account must
+        # instead receive an empty organization scope.
+        origin_organization_id = actor.organization_id if actor.organization_id is not None else -1
     items, total = list_batch_records(
         session,
         q=q,

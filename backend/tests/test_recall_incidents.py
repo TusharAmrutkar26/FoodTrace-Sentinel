@@ -209,7 +209,7 @@ def test_new_migration_preserves_existing_rows_on_isolated_sqlite_database():
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )).scalars())
             assert tuple(row) == ("MIGRATION-KEEP", "12.500", "kg")
-            assert revision == "20261011_0005"
+            assert revision == "20261013_0006"
             assert {
                 "recall_incidents", "recall_candidate_snapshots", "recall_reviews",
                 "recall_follow_up_actions", "recall_incident_history", "users",
@@ -218,7 +218,7 @@ def test_new_migration_preserves_existing_rows_on_isolated_sqlite_database():
                 command.downgrade(config, "20261010_0003")
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalar_one() == "20261011_0005"
+            ).scalar_one() == "20261013_0006"
             assert connection.execute(
                 text("SELECT batch_code, quantity, unit FROM batches WHERE id = 1")
             ).one() == row

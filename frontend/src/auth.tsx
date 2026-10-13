@@ -9,7 +9,7 @@ interface AuthContextValue {
   loading: boolean;
   error: string;
   signIn(email: string, password: string): Promise<void>;
-  register(invitationToken: string, password: string): Promise<void>;
+  register(email: string, password: string, invitationToken?: string): Promise<void>;
   signOut(): Promise<void>;
   retrySession(): Promise<void>;
 }
@@ -83,9 +83,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const session = await api.login({ email, password });
     setUser(session.user);
   }, []);
-  const register = useCallback(async (invitationToken: string, password: string) => {
+  const register = useCallback(async (email: string, password: string, invitationToken?: string) => {
     setError("");
-    const session = await api.registerWithInvitation({ invitation_token: invitationToken, password });
+    const session = invitationToken
+      ? await api.registerWithInvitation({ invitation_token: invitationToken, password })
+      : await api.register({ email, password });
     setUser(session.user);
   }, []);
   const signOut = useCallback(async () => {
@@ -126,6 +128,7 @@ export function AuthenticationPage({
   const [invitationToken, setInvitationToken] = useState(initialInvitationToken);
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const acceptingInvitation = registrationMode && Boolean(invitationToken.trim());
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,7 +136,7 @@ export function AuthenticationPage({
     setSubmitting(true);
     try {
       if (registrationMode) {
-        await register(invitationToken, password);
+        await register(email, password, acceptingInvitation ? invitationToken.trim() : undefined);
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
       } else await signIn(email, password);
     } catch (cause: unknown) {
@@ -147,15 +150,16 @@ export function AuthenticationPage({
     <section className="auth-card" aria-labelledby="auth-title">
       <div className="auth-card-top"><span className="brand-mark" aria-hidden="true">FS</span><div className="header-controls"><LanguageSelector /><ThemeToggle /></div></div>
       <p className="eyebrow">{t("FOOD SUPPLY CHAIN TRACEABILITY")}</p>
-      <h1 id="auth-title">{registrationMode ? t("Accept invitation") : t("Sign in to FoodTrace Sentinel")}</h1>
+      <h1 id="auth-title">{registrationMode ? acceptingInvitation ? t("Accept invitation") : t("Create account") : t("Sign in to FoodTrace Sentinel")}</h1>
       <p className="auth-intro">{registrationMode
-        ? t("Create an account using a valid invitation. This application does not send invitation emails.")
+        ? acceptingInvitation
+          ? t("Create an account using a valid invitation. This application does not send invitation emails.")
+          : t("Create an account without an invitation. New accounts start without an organization and cannot access private organization records until authorized to join.")
         : t("Use your organization account to access private records.")}</p>
       {sessionError ? <div className="auth-error" role="alert">{translateMessage(locale, sessionError)} <button className="auth-retry" type="button" onClick={() => void retrySession()}>{t("Retry")}</button></div> : null}
       {formError ? <div className="auth-error" role="alert">{formError}</div> : null}
-      {registrationMode && !invitationToken ? <p className="auth-security-note" role="note">{t("No invitation token was provided. Ask an administrator to create an invitation and share its one-time token or registration link. This application does not email invitations.")}</p> : null}
       <form className="auth-form" onSubmit={(event) => void submit(event)}>
-        {registrationMode ? <label>{t("Invitation token")}
+        {acceptingInvitation ? <label>{t("Invitation token")}
           <input autoComplete="one-time-code" required value={invitationToken} onChange={(event) => setInvitationToken(event.target.value)} />
         </label> : <label>{t("Email address")}
           <input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -169,7 +173,7 @@ export function AuthenticationPage({
         </button>
       </form>
       <button className="auth-mode-switch" type="button" onClick={() => { setRegistrationMode((value) => !value); setFormError(""); }}>
-        {registrationMode ? t("Return to sign in") : t("Have an invitation? Create an account")}
+        {registrationMode ? t("Return to sign in") : t("Create account")}
       </button>
       <p className="auth-security-note">{t("Passwords are stored as secure hashes. Sessions use an HTTP-only cookie and are revoked when you sign out.")}</p>
     </section>

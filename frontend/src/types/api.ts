@@ -168,6 +168,7 @@ export interface PublicBatchTrace {
   children: PublicGenealogyRelationship[];
   upstream: (PublicGenealogyBatch & { depth: number })[];
   downstream: (PublicGenealogyBatch & { depth: number })[];
+  trace_trust_findings?: Omit<TrustFinding, "finding_id" | "batch_codes" | "evidence" | "recommended_action">[];
 }
 
 export type TrustSeverity = "low" | "medium" | "high";

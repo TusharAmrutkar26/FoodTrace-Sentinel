@@ -9,6 +9,7 @@ from app.schemas.batch_genealogy import (
 )
 from app.schemas.batch_event import EventType
 from app.schemas.common import APIModel, QuantityOutput, Unit, as_utc
+from app.schemas.trust import FindingCheckType, FindingSeverity, FindingStatus
 
 
 class BatchQrIdentityRead(APIModel):
@@ -77,6 +78,16 @@ class PublicTraceBatch(PublicGenealogyBatch):
     depth: int = Field(ge=1)
 
 
+class PublicTraceTrustFinding(APIModel):
+    """A privacy-minimized TraceTrust summary suitable for anonymous display."""
+
+    check_type: FindingCheckType
+    severity: FindingSeverity
+    status: FindingStatus
+    title: str = Field(min_length=1, max_length=120)
+    explanation: str = Field(min_length=1, max_length=1000)
+
+
 class PublicBatchTraceRead(APIModel):
     batch: PublicBatchRead
     events: list[PublicEventRead]
@@ -84,3 +95,4 @@ class PublicBatchTraceRead(APIModel):
     children: list[PublicGenealogyRelationship]
     upstream: list[PublicTraceBatch]
     downstream: list[PublicTraceBatch]
+    trace_trust_findings: list[PublicTraceTrustFinding]

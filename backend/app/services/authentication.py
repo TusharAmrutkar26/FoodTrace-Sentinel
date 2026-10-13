@@ -33,6 +33,10 @@ class InvitationNotAllowed(Exception):
     pass
 
 
+class DuplicateAccount(Exception):
+    pass
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -139,6 +143,8 @@ def create_invitation(
 def register_with_invitation(
     session: Session, payload: RegistrationInput
 ) -> tuple[User, UserSession, str, str]:
+    if payload.invitation_token is None:
+        raise InvalidInvitation
     invitation = session.scalar(
         select(UserInvitation)
         .options(joinedload(UserInvitation.organization))
@@ -181,6 +187,44 @@ def register_with_invitation(
     session.refresh(user)
     session.refresh(invitation)
     user.organization = invitation.organization
+    user_session, session_token, csrf_token = create_session(session, user)
+    return user, user_session, session_token, csrf_token
+
+
+def register_account(
+    session: Session, payload: RegistrationInput
+) -> tuple[User, UserSession, str, str]:
+    """Register an invited member or an unassigned, least-privilege account."""
+    if payload.invitation_token is not None:
+        if payload.email is not None:
+            invitation = session.scalar(
+                select(UserInvitation).where(
+                    UserInvitation.token_hash == token_digest(payload.invitation_token)
+                )
+            )
+            if invitation is None or normalize_email(payload.email) != invitation.email:
+                raise InvalidInvitation
+        return register_with_invitation(session, payload)
+
+    if payload.email is None:
+        raise InvalidInvitation
+    email = normalize_email(payload.email)
+    if session.scalar(select(User.id).where(User.email == email)) is not None:
+        raise DuplicateAccount
+
+    user = User(
+        email=email,
+        password_hash=hash_password(payload.password),
+        organization_id=None,
+        role="viewer",
+    )
+    session.add(user)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise DuplicateAccount from None
+    session.refresh(user)
     user_session, session_token, csrf_token = create_session(session, user)
     return user, user_session, session_token, csrf_token
 

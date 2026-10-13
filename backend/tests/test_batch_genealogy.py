@@ -1,4 +1,6 @@
 from tests.conftest import batch_payload
+from app.models.user import User
+from app.services.authentication import hash_password
 
 
 def create_batch(client, references, code, *, quantity="100.000", unit="kg"):
@@ -206,3 +208,47 @@ def test_batch_updates_cannot_break_recorded_source_unit_or_quantity(
     change_unit = client.patch("/api/v1/batches/UPDATE-PARENT", json={"unit": "g"})
 
     assert reduce.status_code == change_unit.status_code == 409
+
+
+def test_organization_admin_can_read_recorded_genealogy_in_their_scope(
+    client, references, db_session
+):
+    parent = create_batch(client, references, "SCOPED-SPLIT-PARENT")
+    child_one = create_batch(client, references, "SCOPED-SPLIT-CHILD-1")
+    child_two = create_batch(client, references, "SCOPED-SPLIT-CHILD-2")
+    create_edge(
+        client, parent, child_one, "split", source_quantity="30.000", source_unit="kg"
+    )
+    create_edge(
+        client, parent, child_two, "split", source_quantity="20.000", source_unit="kg"
+    )
+
+    db_session.add(
+        User(
+            email="genealogy-reader@example.test",
+            password_hash=hash_password("TestOnlyPassphrase!456"),
+            organization_id=references["organization_id"],
+            role="org_admin",
+        )
+    )
+    db_session.commit()
+    login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "genealogy-reader@example.test",
+            "password": "TestOnlyPassphrase!456",
+        },
+    )
+    assert login.status_code == 200
+
+    graph = client.get("/api/v1/batches/SCOPED-SPLIT-PARENT/genealogy")
+
+    assert graph.status_code == 200
+    assert [edge["child"]["batch_code"] for edge in graph.json()["children"]] == [
+        "SCOPED-SPLIT-CHILD-1",
+        "SCOPED-SPLIT-CHILD-2",
+    ]
+    assert [edge["source_quantity"] for edge in graph.json()["children"]] == [
+        "30.000",
+        "20.000",
+    ]

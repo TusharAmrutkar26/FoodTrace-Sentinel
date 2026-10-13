@@ -59,5 +59,8 @@ def read_batch_qr_svg(
     return Response(
         content=generate_trace_qr_svg(trace_url),
         media_type="image/svg+xml",
-        headers={"Cache-Control": "public, max-age=300"},
+        # The QR payload depends on PUBLIC_TRACE_BASE_URL, which can change when
+        # a development machine moves to another network. Avoid serving an old
+        # payload from a browser cache after the backend has been restarted.
+        headers={"Cache-Control": "no-store"},
     )

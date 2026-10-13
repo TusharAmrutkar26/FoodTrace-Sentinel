@@ -13,6 +13,7 @@ vi.mock("./lib/api", () => ({
   api: {
     getSession: vi.fn(),
     login: vi.fn(),
+    register: vi.fn(),
     registerWithInvitation: vi.fn(),
     logout: vi.fn(),
     createInvitation: vi.fn(),
@@ -55,6 +56,10 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
   vi.mocked(api.getSession).mockRejectedValue(new ApiError("Authentication is required", 401));
   vi.mocked(api.login).mockResolvedValue(signedIn);
+  vi.mocked(api.register).mockResolvedValue({
+    ...signedIn,
+    user: { ...signedIn.user, role: "viewer", organization: null },
+  });
   vi.mocked(api.registerWithInvitation).mockResolvedValue(signedIn);
   vi.mocked(api.logout).mockResolvedValue(undefined);
   vi.mocked(api.listAllOrganizations).mockResolvedValue([
@@ -107,11 +112,25 @@ describe("authentication UI", () => {
     expect(screen.getByLabelText("Invitation token")).toHaveValue(token);
   });
 
-  it("opens /register without a token and explains that an administrator must issue one", async () => {
+  it("opens /register without a token as public self-registration", async () => {
     window.history.replaceState(null, "", "/register");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Accept invitation" })).toBeInTheDocument();
-    expect(screen.getByRole("note")).toHaveTextContent("No invitation token was provided");
+    expect(await screen.findByRole("heading", { name: "Create account" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Email address")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Invitation token")).not.toBeInTheDocument();
+    expect(screen.getByText(/start without an organization/i)).toBeInTheDocument();
+  });
+
+  it("submits public registration with email and password without an invitation token", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<><AuthenticationPage registrationRequested /><AuthStatus /></>);
+    await user.type(await screen.findByLabelText("Email address"), "new-user@example.test");
+    await user.type(screen.getByLabelText(/Password/), "A-long-test-password!");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(api.register).toHaveBeenCalledWith({
+      email: "new-user@example.test",
+      password: "A-long-test-password!",
+    }));
   });
 
   it("explains a missing authentication API route instead of showing an unexplained Not Found", async () => {
@@ -146,9 +165,7 @@ describe("authentication UI", () => {
   it("shows invalid or expired invitation errors without hiding them", async () => {
     const user = userEvent.setup();
     vi.mocked(api.registerWithInvitation).mockRejectedValue(new ApiError("The invitation is invalid or has expired", 400));
-    renderWithProviders(<AuthenticationPage />);
-    await user.click(await screen.findByRole("button", { name: "Have an invitation? Create an account" }));
-    await user.type(screen.getByLabelText("Invitation token"), "bad-token-which-will-be-rejected-by-the-api");
+    renderWithProviders(<AuthenticationPage invitationToken="bad-token-which-will-be-rejected-by-the-api" />);
     await user.type(screen.getByLabelText(/Password/), "A-long-test-password!");
     await user.click(screen.getByRole("button", { name: "Create account" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The invitation is invalid or has expired");

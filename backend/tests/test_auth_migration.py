@@ -49,6 +49,6 @@ def test_auth_migration_preserves_preexisting_records_in_isolated_database():
             assert trace_id == "0123456789abcdef0123456789abcdef"
             assert incident == ("REC-EXISTING-001", "unverified legacy name", None)
             assert connection.execute(text("SELECT COUNT(*) FROM users")).scalar_one() == 0
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261011_0005"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261013_0006"
     finally:
         engine.dispose()

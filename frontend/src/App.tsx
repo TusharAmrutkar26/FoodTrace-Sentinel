@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BatchDialog } from "./components/BatchDialog";
+import { BatchGenealogyExplorer } from "./components/BatchGenealogyExplorer";
 import { CatalogManagement } from "./components/CatalogManagement";
 import { PublicBatchTracePage } from "./components/PublicBatchTracePage";
 import { RecallSimulatorDashboard } from "./components/RecallSimulatorDashboard";
@@ -13,7 +14,7 @@ import { api } from "./lib/api";
 import type { Batch, Organization, Product } from "./types/api";
 
 const PAGE_SIZE = 10;
-type WorkspaceSection = "batches" | "products" | "organizations" | "trust" | "reports" | "recalls" | "recall_incidents";
+type WorkspaceSection = "batches" | "genealogy" | "products" | "organizations" | "trust" | "reports" | "recalls" | "recall_incidents";
 
 type DialogState = { mode: "create" } | { mode: "details"; batchCode: string } | null;
 
@@ -178,6 +179,7 @@ function Dashboard() {
         <div className="nav-label">{t("WORKSPACE")}</div>
         <nav className="workspace-nav" aria-label={t("Workspace sections")}>
           <button type="button" className={`nav-link ${activeSection === "batches" ? "active" : ""}`} aria-current={activeSection === "batches" ? "page" : undefined} onClick={() => setActiveSection("batches")}><Icon name="box" /><span>{t("Batches")}</span><span className="nav-count">{loading || pageError ? "—" : batchTotal}</span></button>
+          <button type="button" className={`nav-link ${activeSection === "genealogy" ? "active" : ""}`} aria-current={activeSection === "genealogy" ? "page" : undefined} onClick={() => setActiveSection("genealogy")}><Icon name="box" /><span>{t("Batch genealogy explorer")}</span></button>
           <button type="button" className={`nav-link ${activeSection === "products" ? "active" : ""}`} aria-current={activeSection === "products" ? "page" : undefined} onClick={() => setActiveSection("products")}><Icon name="leaf" /><span>{t("Products")}</span><span className="nav-count">{loading || catalogError ? "—" : productTotal}</span></button>
           <button type="button" className={`nav-link ${activeSection === "organizations" ? "active" : ""}`} aria-current={activeSection === "organizations" ? "page" : undefined} onClick={() => setActiveSection("organizations")}><Icon name="users" /><span>{t("Organizations")}</span><span className="nav-count">{loading || catalogError ? "—" : organizationTotal}</span></button>
           <button type="button" className={`nav-link ${activeSection === "trust" ? "active" : ""}`} aria-current={activeSection === "trust" ? "page" : undefined} onClick={() => setActiveSection("trust")}><Icon name="shield" /><span>{t("TraceTrust")}</span></button>
@@ -195,7 +197,7 @@ function Dashboard() {
 
       <main className="main-content" id="dashboard">
         <header className="topbar">
-          <div className="breadcrumb">{t("Workspace")} <span>/</span> <strong>{t(activeSection === "batches" ? "Batch management" : activeSection === "products" ? "Product management" : activeSection === "organizations" ? "Organization management" : activeSection === "reports" ? "Supply-chain reports" : activeSection === "recalls" ? "Recall simulator" : activeSection === "recall_incidents" ? "Recall incidents" : "TraceTrust")}</strong></div>
+          <div className="breadcrumb">{t("Workspace")} <span>/</span> <strong>{t(activeSection === "batches" ? "Batch management" : activeSection === "genealogy" ? "Batch genealogy explorer" : activeSection === "products" ? "Product management" : activeSection === "organizations" ? "Organization management" : activeSection === "reports" ? "Supply-chain reports" : activeSection === "recalls" ? "Recall simulator" : activeSection === "recall_incidents" ? "Recall incidents" : "TraceTrust")}</strong></div>
           <div className="topbar-meta"><span className="live-indicator"><span /> {t("Live data")}</span><LanguageSelector /><ThemeToggle />
             <div className="user-session"><span className="user-session-email">{user?.email}</span><span className="user-session-role">{t(user?.role ?? "viewer")} · {user?.organization?.name ?? t("Platform-wide")}</span></div>
             {user && ["platform_admin", "org_admin"].includes(user.role) ? <button className="button button-secondary invite-button" onClick={() => setInviteOpen(true)}>{t("Invite user")}</button> : null}
@@ -205,7 +207,7 @@ function Dashboard() {
         </header>
 
         <div className="page-content">
-          {activeSection === "trust" ? <TraceTrustDashboard onOpenBatch={(batchCode) => { setActiveSection("batches"); setDialog({ mode: "details", batchCode }); }} /> : activeSection === "reports" ? <ReportsDashboard /> : activeSection === "recalls" ? <RecallSimulatorDashboard /> : activeSection === "recall_incidents" ? <RecallIncidentsDashboard /> : activeSection === "batches" ? <>
+          {activeSection === "genealogy" ? <BatchGenealogyExplorer /> : activeSection === "trust" ? <TraceTrustDashboard onOpenBatch={(batchCode) => { setActiveSection("batches"); setDialog({ mode: "details", batchCode }); }} /> : activeSection === "reports" ? <ReportsDashboard /> : activeSection === "recalls" ? <RecallSimulatorDashboard /> : activeSection === "recall_incidents" ? <RecallIncidentsDashboard /> : activeSection === "batches" ? <>
           <section className="page-heading" aria-labelledby="page-title">
             <div>
               <p className="eyebrow">{t("SUPPLY CHAIN OVERVIEW")}</p>

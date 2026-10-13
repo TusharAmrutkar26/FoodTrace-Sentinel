@@ -26,6 +26,15 @@ def test_qr_identity_is_stable_opaque_and_generates_svg(client, references, monk
     monkeypatch.setattr(
         "app.services.qr_codes.PUBLIC_TRACE_BASE_URL", "http://192.0.2.10:5176"
     )
+    from app.services.qr_codes import generate_trace_qr_svg as render_qr_svg
+
+    generated_urls = []
+
+    def capture_qr_url(trace_url):
+        generated_urls.append(trace_url)
+        return render_qr_svg(trace_url)
+
+    monkeypatch.setattr("app.api.v1.batch_qr.generate_trace_qr_svg", capture_qr_url)
     created = client.post("/api/v1/batches", json=batch_payload(references))
     assert created.status_code == 201
 
@@ -46,6 +55,8 @@ def test_qr_identity_is_stable_opaque_and_generates_svg(client, references, monk
     svg = client.get("/api/v1/batches/MNG-100/qr.svg")
     assert svg.status_code == 200
     assert svg.headers["content-type"].startswith("image/svg+xml")
+    assert svg.headers["cache-control"] == "no-store"
+    assert generated_urls == [identity["trace_url"]]
     svg_root = ElementTree.fromstring(svg.content)
     assert svg_root.tag.endswith("svg")
     qr_paths = svg_root.findall(".//{http://www.w3.org/2000/svg}path")
@@ -92,7 +103,7 @@ def test_trace_url_configuration_rejects_invalid_origins(monkeypatch):
 
 
 def test_public_trace_returns_available_data_without_internal_notes(
-    client, references, monkeypatch
+    client, anonymous_client, references, monkeypatch
 ):
     monkeypatch.setattr(
         "app.services.qr_codes.PUBLIC_TRACE_BASE_URL", "http://192.0.2.10:5176"
@@ -127,7 +138,7 @@ def test_public_trace_returns_available_data_without_internal_notes(
     assert relation.status_code == 201
 
     identity = client.get("/api/v1/batches/MNG-CHILD/qr").json()
-    response = client.get(f"/api/v1/public-traces/{identity['trace_id']}")
+    response = anonymous_client.get(f"/api/v1/public-traces/{identity['trace_id']}")
 
     assert response.status_code == 200
     body = response.json()
@@ -145,10 +156,81 @@ def test_public_trace_returns_available_data_without_internal_notes(
     assert body["upstream"][0]["batch_code"] == "MNG-SOURCE"
     assert body["children"] == []
     assert body["downstream"] == []
+    assert body["trace_trust_findings"] == []
     assert "notes" not in response.text
     assert "phone number" not in response.text
     assert '"id"' not in response.text
     assert "participant_type" not in response.text
+
+
+def test_public_trace_includes_minimized_trust_finding_without_authentication(
+    client, anonymous_client, references
+):
+    parent = client.post(
+        "/api/v1/batches", json=batch_payload(references, batch_code="MNG-SOURCE")
+    )
+    child = client.post(
+        "/api/v1/batches", json=batch_payload(references, batch_code="MNG-CHILD")
+    )
+    assert parent.status_code == child.status_code == 201
+
+    relationship = client.post(
+        "/api/v1/genealogy",
+        json={
+            "parent_batch_id": parent.json()["id"],
+            "child_batch_id": child.json()["id"],
+            "relationship_type": "transformation",
+        },
+    )
+    assert relationship.status_code == 201
+    identity = client.get("/api/v1/batches/MNG-CHILD/qr").json()
+
+    response = anonymous_client.get(
+        f"/api/v1/public-traces/{identity['trace_id']}"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["batch"]["batch_code"] == "MNG-CHILD"
+    assert body["trace_trust_findings"] == [
+        {
+            "check_type": "process_loss_incomplete",
+            "severity": "low",
+            "status": "incomplete",
+            "title": "Process loss could not be assessed",
+            "explanation": "The relationship does not record an input quantity.",
+        }
+    ]
+    public_finding = body["trace_trust_findings"][0]
+    for private_field in (
+        "finding_id",
+        "batch_codes",
+        "evidence",
+        "recommended_action",
+    ):
+        assert private_field not in public_finding
+    assert '"id"' not in response.text
+
+
+def test_public_trace_for_unlinked_batch_returns_empty_record_sections(
+    client, anonymous_client, references
+):
+    created = client.post("/api/v1/batches", json=batch_payload(references))
+    assert created.status_code == 201
+    identity = client.get("/api/v1/batches/MNG-100/qr").json()
+
+    response = anonymous_client.get(
+        f"/api/v1/public-traces/{identity['trace_id']}"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["events"] == []
+    assert body["parents"] == []
+    assert body["children"] == []
+    assert body["upstream"] == []
+    assert body["downstream"] == []
+    assert body["trace_trust_findings"] == []
 
 
 def test_unknown_batch_qr_and_public_trace_return_not_found(client):

@@ -266,6 +266,14 @@ export const api = {
     setCsrfToken(result.csrf_token);
     return result;
   },
+  async register(payload: { email: string; password: string }): Promise<AuthSession> {
+    const result = await request<AuthSession>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    setCsrfToken(result.csrf_token);
+    return result;
+  },
   async logout(): Promise<void> {
     await request<void>("/auth/logout", { method: "POST" });
     setCsrfToken(null);

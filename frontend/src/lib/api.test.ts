@@ -35,6 +35,28 @@ function responseWithContentType(contentType: string, body: unknown, status = 20
 afterEach(() => vi.unstubAllGlobals());
 
 describe("API client", () => {
+  it("registers a public account through the session API and stores the CSRF token in memory", async () => {
+    const session = {
+      user: { email: "new@example.test", role: "viewer", organization: null },
+      csrf_token: "csrf-registration-token",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session, 201))
+      .mockResolvedValueOnce(jsonResponse(undefined, 204));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.register({ email: "New@Example.Test", password: "A-long-test-password!" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/auth/register");
+    expect(fetchMock.mock.calls[0][1]?.credentials).toBe("include");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      email: "New@Example.Test",
+      password: "A-long-test-password!",
+    });
+    await api.logout();
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("X-CSRF-Token")).toBe("csrf-registration-token");
+  });
+
   it("sends credentials and the synchronizer CSRF token, retaining it when logout fails", async () => {
     const session = {
       user: {

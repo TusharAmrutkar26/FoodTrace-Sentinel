@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import TRACE_TRUST_PROCESS_LOSS_THRESHOLD_PERCENT
 from app.models.batch import Batch
 from app.models.batch_event import BatchEvent
 from app.models.batch_trace_identity import BatchTraceIdentity
@@ -11,8 +12,10 @@ from app.schemas.public_trace import (
     PublicEventRead,
     PublicGenealogyRelationship,
     PublicTraceBatch,
+    PublicTraceTrustFinding,
 )
 from app.services.batch_genealogy import get_genealogy, trace_genealogy
+from app.services.trace_trust import get_trust_findings_for_batch_codes
 
 
 def get_public_batch_trace(
@@ -38,6 +41,11 @@ def get_public_batch_trace(
         .where(BatchEvent.batch_id == batch.id)
         .order_by(BatchEvent.occurred_at, BatchEvent.id)
     ).all()
+    trust_findings = get_trust_findings_for_batch_codes(
+        session,
+        process_loss_threshold_percent=TRACE_TRUST_PROCESS_LOSS_THRESHOLD_PERCENT,
+        batch_codes=[batch.batch_code],
+    )
 
     if genealogy is None or upstream is None or downstream is None:
         return None
@@ -75,5 +83,17 @@ def get_public_batch_trace(
         downstream=[
             PublicTraceBatch(**node.model_dump(exclude={"id"}))
             for node in downstream.batches
+        ],
+        # Public QR pages receive only the selected batch's finding summary.
+        # Internal finding IDs, related batch codes, evidence, and actions stay private.
+        trace_trust_findings=[
+            PublicTraceTrustFinding(
+                check_type=finding.check_type,
+                severity=finding.severity,
+                status=finding.status,
+                title=finding.title,
+                explanation=finding.explanation,
+            )
+            for finding in trust_findings
         ],
     )

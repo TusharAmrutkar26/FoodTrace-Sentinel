@@ -17,12 +17,13 @@ from app.schemas.auth import (
     RegistrationInput,
 )
 from app.services.authentication import (
+    DuplicateAccount,
     InvalidCredentials,
     InvalidInvitation,
     InvitationNotAllowed,
     create_invitation,
     create_session,
-    register_with_invitation,
+    register_account,
     revoke_session,
     rotate_csrf_token,
     verify_login,
@@ -83,7 +84,9 @@ def register(
     session: DbSession,
 ) -> AuthSessionRead:
     try:
-        user, _row, raw_session, csrf_token = register_with_invitation(session, payload)
+        user, _row, raw_session, csrf_token = register_account(session, payload)
+    except DuplicateAccount as error:
+        raise HTTPException(status_code=409, detail="An account with this email already exists") from error
     except InvalidInvitation as error:
         raise HTTPException(status_code=400, detail="The invitation is invalid or has expired") from error
     _set_session_cookie(response, raw_session)

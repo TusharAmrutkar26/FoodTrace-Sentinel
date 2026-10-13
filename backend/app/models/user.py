@@ -20,8 +20,8 @@ class User(Base):
             name="valid_role",
         ),
         CheckConstraint(
-            "role = 'platform_admin' OR organization_id IS NOT NULL",
-            name="organization_required_for_members",
+            "role IN ('platform_admin', 'viewer') OR organization_id IS NOT NULL",
+            name="organization_required_for_privileged_members",
         ),
         Index("ix_users_organization_role", "organization_id", "role"),
     )

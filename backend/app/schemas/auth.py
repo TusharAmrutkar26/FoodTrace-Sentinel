@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, field_validator
+from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from app.schemas.common import APIModel, as_utc
 
@@ -30,8 +30,20 @@ class LoginInput(APIModel):
 
 
 class RegistrationInput(APIModel):
-    invitation_token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=32, max_length=128)]
+    email: EmailInput | None = None
+    invitation_token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=32, max_length=128)] | None = None
     password: PasswordInput
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str | None) -> str | None:
+        return normalize_email(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def require_email_or_invitation(self) -> "RegistrationInput":
+        if self.email is None and self.invitation_token is None:
+            raise ValueError("An email address is required for account registration")
+        return self
 
 
 class InvitationCreate(APIModel):
